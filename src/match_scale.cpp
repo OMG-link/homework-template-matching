@@ -102,7 +102,7 @@ float Match_also_scale(uint8 s[S_SIZE][S_SIZE], uint8 t[T_SIZE][T_SIZE], int &re
     for (int i = 0; i < STEP_NUM; i++) {
         auto result = testScale(vs, vt, getScale(i));
         basicScores.push_back(result.score);
-        fprintf(stderr, "scale=%f, score=%f\n", getScale(i), result.score);
+        // fprintf(stderr, "scale=%f, score=%f\n", getScale(i), result.score);
     }
     // Search around valleys
     const int MAX_SEARCH_NUM = 2;
