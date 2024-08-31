@@ -1,31 +1,13 @@
 #include <algorithm>
 #include <climits>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 #include "constants.h"
+#include "image.hpp"
 
 namespace Utils {
-
-// // Useless when using t-mask.
-// class ItvSum2D {
-//   private:
-//     int height, width;
-//     std::vector<std::vector<int64>> psum;
-
-//   public:
-//     ItvSum2D(std::vector<std::vector<int64>> src)
-//         : height(src.size()), width(src[0].size()), psum(height + 1, std::vector<int64>(width + 1, 0ll)) {
-//         for (int i = 1; i <= height; i++) {
-//             for (int j = 1; j <= width; j++) {
-//                 psum[i][j] = psum[i - 1][j] + psum[i][j - 1] - psum[i - 1][j - 1] + src[i - 1][j - 1];
-//             }
-//         }
-//     }
-
-//     // 左闭右开, 0-index
-//     int64 query(int x1, int y1, int x2, int y2) { return psum[x2][y2] - psum[x2][y1] - psum[x1][y2] + psum[x1][y1]; }
-// };
 
 struct Complex {
     double real, imag;
@@ -127,20 +109,19 @@ std::vector<int64> fft(const std::vector<int64> &a, const std::vector<int64> &b)
 using Utils::fft;
 
 struct MatchResult {
-    bool found;
-    int64 score;
+    double score;
     int x, y;
 };
 
 MatchResult fastMatch(const Image &s, const Image &t, std::vector<std::vector<bool>> tMask) {
     static int call_cnt = 0;
     call_cnt++;
-    const int S_HEIGHT = s.size();
-    const int S_WIDTH = s[0].size();
-    const int T_HEIGHT = t.size();
-    const int T_WIDTH = t[0].size();
+    const int S_HEIGHT = s.height;
+    const int S_WIDTH = s.width;
+    const int T_HEIGHT = t.height;
+    const int T_WIDTH = t.width;
     if (T_HEIGHT > S_HEIGHT || T_WIDTH > S_WIDTH) {
-        return {false, LONG_LONG_MAX, -1, -1};
+        return {-std::numeric_limits<double>::infinity(), -1, -1};
     }
     std::vector<int64> arrS(S_HEIGHT * S_WIDTH, 0);
     std::vector<int64> arrT(S_HEIGHT * S_WIDTH, 0);
@@ -168,26 +149,26 @@ MatchResult fastMatch(const Image &s, const Image &t, std::vector<std::vector<bo
     auto s2q = fft(arrS2, arrMask);
     const int resHeight = S_HEIGHT - T_HEIGHT + 1;
     const int resWidth = S_WIDTH - T_WIDTH + 1;
-    std::vector result(resHeight, std::vector<int64>(resWidth));
+    std::vector result(resHeight, std::vector<double>(resWidth));
     for (int bx = 0; bx < resHeight; bx++) {
         for (int by = 0; by < resWidth; by++) {
-            int64 s2 = s2q[bx * S_WIDTH + by + arrMask.size() - 1];
-            int64 t2 = sumT2;
+            uint64 s2 = s2q[bx * S_WIDTH + by + arrMask.size() - 1];
+            uint64 t2 = sumT2;
             int64 st = stq[bx * S_WIDTH + by + arrT.size() - 1];
-            result[bx][by] = s2 - 2 * st + t2;
+            result[bx][by] = st / std::sqrt(static_cast<double>(s2 * t2));
         }
     }
-    int64 bestScore = LONG_LONG_MAX;
+    double bestScore = -std::numeric_limits<double>::infinity();
     int retX = -1, retY = -1;
     for (int bx = 0; bx < resHeight; bx++) {
         for (int by = 0; by < resWidth; by++) {
-            int64 score = result[bx][by];
-            if (score < bestScore) {
+            double score = result[bx][by];
+            if (score > bestScore) {
                 bestScore = score;
                 retX = bx;
                 retY = by;
             }
         }
     }
-    return {true, bestScore, retX, retY};
+    return {bestScore, retX, retY};
 }

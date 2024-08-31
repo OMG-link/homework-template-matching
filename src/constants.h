@@ -6,8 +6,7 @@
 
 using uint8 = unsigned char;
 using int64 = long long;
-
-using Image = std::vector<std::vector<uint8>>;
+using uint64 = unsigned long long;
 
 const double PI = acos(-1);
 

@@ -4,17 +4,15 @@
 #include "constants.h"
 #include "fast_match.cpp"
 
-const int64 SCORE_THRESHOLD = (int64)(256 * 256 / 3) * (T_SIZE * T_SIZE) / 16 * DETECT_SENSITIVITY;
-
 namespace ImageUtil {
 
 void scaleImage(const Image &originalImage, float scale, Image &resultImage) {
-    int originalHeight = originalImage.size();
-    int originalWidth = originalImage[0].size();
+    int originalHeight = originalImage.height;
+    int originalWidth = originalImage.width;
 
     int newHeight = static_cast<int>(originalHeight * scale);
     int newWidth = static_cast<int>(originalWidth * scale);
-    resultImage.assign(newHeight, std::vector<uint8>(newWidth));
+    resultImage = Image(newHeight, newWidth);
 
     for (int i = 0; i < newHeight; ++i) {
         for (int j = 0; j < newWidth; ++j) {
@@ -36,14 +34,11 @@ using ImageUtil::scaleImage;
 MatchResult testScale(const Image &vs, const Image &vt, float scale) {
     Image scaledT;
     scaleImage(vt, scale, scaledT);
-    std::vector tMask(scaledT.size(), std::vector<bool>(scaledT[0].size(), true));
-    auto result = fastMatch(vs, scaledT, tMask);
-    // 归一化
-    result.score = result.score * (vt.size() * vt[0].size()) / (scaledT.size() * scaledT[0].size());
-    return result;
+    std::vector tMask(scaledT.height, std::vector<bool>(scaledT.width, true));
+    return fastMatch(vs, scaledT, tMask);
 }
 
-std::pair<float, MatchResult> findValley(const Image &vs, const Image &vt, float lsr, float rsr) {
+std::pair<float, MatchResult> findPeek(const Image &vs, const Image &vt, float lsr, float rsr) {
     const int TP_LIMIT = 10;
     const float phi = (std::sqrt(5.0) - 1.0) / 2.0;
     float x1 = rsr - phi * (rsr - lsr);
@@ -52,11 +47,11 @@ std::pair<float, MatchResult> findValley(const Image &vs, const Image &vt, float
     MatchResult result1 = testScale(vs, vt, x1);
     MatchResult result2 = testScale(vs, vt, x2);
 
-    MatchResult bestResult = result1.score < result2.score ? result1 : result2;
-    float bestScale = result1.score < result2.score ? x1 : x2;
+    MatchResult bestResult = result1.score > result2.score ? result1 : result2;
+    float bestScale = result1.score > result2.score ? x1 : x2;
 
     for (int i = 0; i < TP_LIMIT; ++i) {
-        if (result1.score < result2.score) {
+        if (result1.score > result2.score) {
             rsr = x2;
             x2 = x1;
             result2 = result1;
@@ -70,7 +65,7 @@ std::pair<float, MatchResult> findValley(const Image &vs, const Image &vt, float
             result2 = testScale(vs, vt, x2);
         }
 
-        if (result1.score < result2.score) {
+        if (result1.score > result2.score) {
             bestResult = result1;
             bestScale = x1;
         } else {
@@ -83,8 +78,8 @@ std::pair<float, MatchResult> findValley(const Image &vs, const Image &vt, float
 }
 
 float Match_also_scale(uint8 s[S_SIZE][S_SIZE], uint8 t[T_SIZE][T_SIZE], int &retX, int &retY) {
-    Image vs(S_SIZE, std::vector<uint8>(S_SIZE, 0));
-    Image vt(T_SIZE, std::vector<uint8>(T_SIZE, 0));
+    Image vs(S_SIZE, S_SIZE);
+    Image vt(T_SIZE, T_SIZE);
     std::vector tMask(T_SIZE, std::vector<bool>(T_SIZE, true));
     for (int i = 0; i < S_SIZE; i++) {
         for (int j = 0; j < S_SIZE; j++) {
@@ -103,40 +98,36 @@ float Match_also_scale(uint8 s[S_SIZE][S_SIZE], uint8 t[T_SIZE][T_SIZE], int &re
     auto getScale = [&](int id) -> float {
         return MIN_SCALE * pow(MAX_SCALE / MIN_SCALE, static_cast<float>(id) / (STEP_NUM - 1));
     };
-    std::vector<int64> basicScores;
+    std::vector<double> basicScores;
     for (int i = 0; i < STEP_NUM; i++) {
         auto result = testScale(vs, vt, getScale(i));
-        if (result.found) {
-            basicScores.push_back(result.score);
-            fprintf(stderr, "scale=%f, score=%lld\n", getScale(i), result.score);
-        } else {
-            basicScores.push_back(LONG_LONG_MAX);
-        }
+        basicScores.push_back(result.score);
+        fprintf(stderr, "scale=%f, score=%f\n", getScale(i), result.score);
     }
     // Search around valleys
     const int MAX_SEARCH_NUM = 2;
     std::vector<int> valleys;
     for (int i = 1; i < STEP_NUM - 1; i++) {
-        int64 lastScore = basicScores[i - 1];
-        int64 nextScore = basicScores[i + 1];
-        int64 currentScore = basicScores[i];
-        if ((i == 1 || currentScore < lastScore) && (i == STEP_NUM - 2 || currentScore < nextScore)) {
+        double lastScore = basicScores[i - 1];
+        double nextScore = basicScores[i + 1];
+        double currentScore = basicScores[i];
+        if ((i == 1 || currentScore > lastScore) && (i == STEP_NUM - 2 || currentScore > nextScore)) {
             valleys.push_back(i);
         }
     }
-    std::sort(valleys.begin(), valleys.end(), [&](int x, int y) -> bool { return basicScores[x] < basicScores[y]; });
-    int64 bestScore = LONG_LONG_MAX;
+    std::sort(valleys.begin(), valleys.end(), [&](int x, int y) -> bool { return basicScores[x] > basicScores[y]; });
+    double bestScore = -std::numeric_limits<double>::infinity();
     float bestScale = 0;
     for (int i = 0; i < (int)valleys.size() && i < MAX_SEARCH_NUM; i++) {
         int valleyId = valleys[i];
-        auto [resultScale, result] = findValley(vs, vt, getScale(valleyId - 1), getScale(valleyId + 1));
-        if (result.score < bestScore) {
+        auto [resultScale, result] = findPeek(vs, vt, getScale(valleyId - 1), getScale(valleyId + 1));
+        if (result.score > bestScore) {
             bestScore = result.score;
             bestScale = resultScale;
             retX = result.x;
             retY = result.y;
         }
     }
-    fprintf(stderr, "Score=%lld, Scale=%f, X=%d, Y=%d\n", bestScore, bestScale, retX, retY);
+    fprintf(stderr, "Score=%f, Scale=%f, X=%d, Y=%d\n", bestScore, bestScale, retX, retY);
     return bestScale;
 }

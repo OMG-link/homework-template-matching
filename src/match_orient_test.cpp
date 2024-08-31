@@ -190,7 +190,7 @@ Image reduceImageSize(const Image &vs, const Image &vt, int &bx, int &by) {
     return getSubImage(vs, lx, ly, rx, ry);
 }
 
-std::pair<float, MatchResult> findValley(const Image &vs, const Image &vt, float lrad, float rrad) {
+std::pair<float, MatchResult> findPeek(const Image &vs, const Image &vt, float lrad, float rrad) {
     const int TP_LIMIT = 10;
     const float phi = (std::sqrt(5.0) - 1.0) / 2.0;
     float x1 = rrad - phi * (rrad - lrad);
@@ -257,7 +257,7 @@ float matchOrient(const Image &vs, const Image &vt, int &retX, int &retY) {
     float bestRad = 0;
     for (int i = 0; i < (int)valleys.size() && i < MAX_SEARCH_NUM; i++) {
         int valleyId = valleys[i];
-        auto [resultRad, result] = findValley(vs, vt, getRad(valleyId - 1), getRad(valleyId + 1));
+        auto [resultRad, result] = findPeek(vs, vt, getRad(valleyId - 1), getRad(valleyId + 1));
         if (result.score < bestScore) {
             bestScore = result.score;
             bestRad = resultRad;

@@ -3,11 +3,9 @@
 #include "constants.h"
 #include "fast_match.cpp"
 
-const int64 SCORE_THRESHOLD = (int64)(256 * 256 / 3) * (T_SIZE * T_SIZE) / 16 * DETECT_SENSITIVITY;
-
 bool Match_accelerated(uint8 s[S_SIZE][S_SIZE], uint8 t[T_SIZE][T_SIZE], int &retX, int &retY) {
-    std::vector vs(S_SIZE, std::vector<uint8>(S_SIZE, 0));
-    std::vector vt(T_SIZE, std::vector<uint8>(T_SIZE, 0));
+    Image vs(S_SIZE, S_SIZE);
+    Image vt(T_SIZE, T_SIZE);
     std::vector tMask(T_SIZE, std::vector<bool>(T_SIZE, true));
     for (int i = 0; i < S_SIZE; i++) {
         for (int j = 0; j < S_SIZE; j++) {
@@ -20,7 +18,8 @@ bool Match_accelerated(uint8 s[S_SIZE][S_SIZE], uint8 t[T_SIZE][T_SIZE], int &re
         }
     }
     auto result = fastMatch(vs, vt, tMask);
-    if (result.found && result.score < SCORE_THRESHOLD) {
+    fprintf(stderr, "Score=%f\n", result.score);
+    if (result.score > 0.9) {
         retX = result.x;
         retY = result.y;
         return true;

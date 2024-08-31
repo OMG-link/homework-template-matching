@@ -4,8 +4,6 @@
 #include "constants.h"
 #include "fast_match.cpp"
 
-const int64 SCORE_THRESHOLD = (int64)(256 * 256 / 3) * (T_SIZE * T_SIZE) / 16 * DETECT_SENSITIVITY;
-
 namespace ImageUtil {
 
 uint8 bilinearInterpolation(const Image &image, float x, float y) {
@@ -23,12 +21,12 @@ uint8 bilinearInterpolation(const Image &image, float x, float y) {
 
 void rotateImage(const Image &originalImage, float rad, Image &resultImage,
                  std::vector<std::vector<bool>> &resultMask) {
-    int originalHeight = originalImage.size();
-    int originalWidth = originalImage[0].size();
+    int originalHeight = originalImage.height;
+    int originalWidth = originalImage.width;
     int canvasLength = 2 * std::max(originalHeight, originalWidth);
 
     // 计算旋转后图像的大小，并初始化result和mask
-    Image rotatedImage(canvasLength, std::vector<uint8>(canvasLength, 0));
+    Image rotatedImage(canvasLength, canvasLength);
     std::vector<std::vector<bool>> rotatedMask(canvasLength, std::vector<bool>(canvasLength, false));
 
     float cosRad = cos(rad);
@@ -69,7 +67,7 @@ void rotateImage(const Image &originalImage, float rad, Image &resultImage,
     int resultHeight = maxX - minX + 1;
     int resultWidth = maxY - minY + 1;
 
-    resultImage = Image(resultHeight, std::vector<uint8>(resultWidth, 0));
+    resultImage = Image(resultHeight, resultWidth);
     resultMask = std::vector<std::vector<bool>>(resultHeight, std::vector<bool>(resultWidth, false));
 
     for (int x = 0; x < resultHeight; x++) {
@@ -96,8 +94,8 @@ MatchResult testRad(const Image &vs, const Image &vt, float rad) {
     rotateImage(vt, rad, rotatedT, tMask);
     auto result = fastMatch(vs, rotatedT, tMask);
     // 获取左上角坐标对应的位置
-    int rotatedHeight = rotatedT.size();
-    int rotatedWidth = rotatedT[0].size();
+    int rotatedHeight = rotatedT.height;
+    int rotatedWidth = rotatedT.width;
     if (rad < 0.5 * PI) {
         for (int y = 0; y < rotatedWidth; y++) {
             if (tMask[0][y]) {
@@ -144,7 +142,7 @@ std::tuple<int, int, int, int> getSubImageRoot(int x, int y, int tHeight, int tW
 Image getSubImage(const Image &originalImage, int lx, int ly, int rx, int ry) {
     int height = rx - lx;
     int width = ry - ly;
-    Image resultImage(height, std::vector<uint8>(width));
+    Image resultImage(height, width);
     for (int i = 0; i < height; i++) {
         for (int j = 0; j < width; j++) {
             resultImage[i][j] = originalImage[lx + i][ly + j];
@@ -153,7 +151,7 @@ Image getSubImage(const Image &originalImage, int lx, int ly, int rx, int ry) {
     return resultImage;
 }
 
-std::pair<float, MatchResult> findValley(const Image &vs, const Image &vt, float lrad, float rrad) {
+std::pair<float, MatchResult> findPeek(const Image &vs, const Image &vt, float lrad, float rrad) {
     const int TP_LIMIT = 10;
     const float phi = (std::sqrt(5.0) - 1.0) / 2.0;
     float x1 = rrad - phi * (rrad - lrad);
@@ -162,11 +160,11 @@ std::pair<float, MatchResult> findValley(const Image &vs, const Image &vt, float
     MatchResult result1 = testRad(vs, vt, x1);
     MatchResult result2 = testRad(vs, vt, x2);
 
-    MatchResult bestResult = result1.score < result2.score ? result1 : result2;
-    float bestRad = result1.score < result2.score ? x1 : x2;
+    MatchResult bestResult = result1.score > result2.score ? result1 : result2;
+    float bestRad = result1.score > result2.score ? x1 : x2;
 
     for (int i = 0; i < TP_LIMIT; ++i) {
-        if (result1.score < result2.score) {
+        if (result1.score > result2.score) {
             rrad = x2;
             x2 = x1;
             result2 = result1;
@@ -180,7 +178,7 @@ std::pair<float, MatchResult> findValley(const Image &vs, const Image &vt, float
             result2 = testRad(vs, vt, x2);
         }
 
-        if (result1.score < result2.score) {
+        if (result1.score > result2.score) {
             bestResult = result1;
             bestRad = x1;
         } else {
@@ -193,8 +191,8 @@ std::pair<float, MatchResult> findValley(const Image &vs, const Image &vt, float
 }
 
 float Match_also_orient(uint8 s[S_SIZE][S_SIZE], uint8 t[T_SIZE][T_SIZE], int &retX, int &retY) {
-    Image vs(S_SIZE, std::vector<uint8>(S_SIZE, 0));
-    Image vt(T_SIZE, std::vector<uint8>(T_SIZE, 0));
+    Image vs(S_SIZE, S_SIZE);
+    Image vt(T_SIZE, T_SIZE);
     std::vector tMask(T_SIZE, std::vector<bool>(T_SIZE, true));
     for (int i = 0; i < S_SIZE; i++) {
         for (int j = 0; j < S_SIZE; j++) {
@@ -215,25 +213,25 @@ float Match_also_orient(uint8 s[S_SIZE][S_SIZE], uint8 t[T_SIZE][T_SIZE], int &r
         auto result = testRad(vs, vt, rad);
         basicResult.push_back(result);
         // auto [lx, ly, rx, ry] = getSubImageRoot(basicResult[i].x, basicResult[i].y, T_SIZE, T_SIZE, getRad(i));
-        // fprintf(stderr, "rad=%f, score=%lld, box=[(%d,%d),(%d,%d)]\n", rad, result.score, lx, ly, rx, ry);
+        // fprintf(stderr, "rad=%f, score=%f, box=[(%d,%d),(%d,%d)]\n", rad, result.score, lx, ly, rx, ry);
     }
-    // Search around valleys
+    // Search around peeks
     const int MAX_SEARCH_NUM = 2;
-    std::vector<int> valleys;
+    std::vector<int> peeks;
     for (int i = 0; i < STEP_NUM; i++) {
-        int64 lastScore = basicResult[(i + STEP_NUM - 1) % STEP_NUM].score;
-        int64 nextScore = basicResult[(i + 1) % STEP_NUM].score;
-        int64 currentScore = basicResult[i].score;
-        if (currentScore < lastScore && currentScore < nextScore) {
-            valleys.push_back(i);
+        double lastScore = basicResult[(i + STEP_NUM - 1) % STEP_NUM].score;
+        double nextScore = basicResult[(i + 1) % STEP_NUM].score;
+        double currentScore = basicResult[i].score;
+        if (currentScore > lastScore && currentScore > nextScore) {
+            peeks.push_back(i);
         }
     }
-    std::sort(valleys.begin(), valleys.end(),
-              [&](int x, int y) -> bool { return basicResult[x].score < basicResult[y].score; });
-    int64 bestScore = LONG_LONG_MAX;
+    std::sort(peeks.begin(), peeks.end(),
+              [&](int x, int y) -> bool { return basicResult[x].score > basicResult[y].score; });
+    double bestScore = -std::numeric_limits<double>::infinity();
     float bestRad = 0;
-    for (int i = 0; i < (int)valleys.size() && i < MAX_SEARCH_NUM; i++) {
-        int valleyId = valleys[i];
+    for (int i = 0; i < (int)peeks.size() && i < MAX_SEARCH_NUM; i++) {
+        int valleyId = peeks[i];
         auto [lx, ly, rx, ry] =
             getSubImageRoot(basicResult[valleyId].x, basicResult[valleyId].y, T_SIZE, T_SIZE, getRad(valleyId));
         lx = std::max(lx, 0);
@@ -241,16 +239,16 @@ float Match_also_orient(uint8 s[S_SIZE][S_SIZE], uint8 t[T_SIZE][T_SIZE], int &r
         rx = std::min(rx, S_SIZE);
         ry = std::min(ry, S_SIZE);
         auto subvs = getSubImage(vs, lx, ly, rx, ry);
-        auto [resultRad, result] = findValley(subvs, vt, getRad(valleyId - 1), getRad(valleyId + 1));
+        auto [resultRad, result] = findPeek(subvs, vt, getRad(valleyId - 1), getRad(valleyId + 1));
         result.x += lx;
         result.y += ly;
-        if (result.score < bestScore) {
+        if (result.score > bestScore) {
             bestScore = result.score;
             bestRad = resultRad;
             retX = result.x;
             retY = result.y;
         }
     }
-    fprintf(stderr, "Score=%lld, Rad=%f, X=%d, Y=%d\n", bestScore, bestRad, retX, retY);
+    fprintf(stderr, "Score=%f, Rad=%f, X=%d, Y=%d\n", bestScore, bestRad, retX, retY);
     return bestRad;
 }
